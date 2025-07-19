@@ -3,7 +3,7 @@ import json
 import feedparser
 import requests
 from datetime import datetime
-from googletrans import Translator
+from deep_translator import GoogleTranslator
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK_URL']
@@ -21,33 +21,26 @@ TWITTER_USERS = [
     'AshrafLaidi',
     'PeterLBrandt',
     'JamieSaettele'
-    # ajoute ici les autres handles que tu veux
 ]
-
-# Génère les URLs TwitRSS.me
 TWITTER_FEED_URLS = [
     f'https://twitrss.me/twitter_user_to_rss/?user={user}'
     for user in TWITTER_USERS
 ]
 
-# On garde tout dans le même historique
 SEEN_FILE = 'seen.json'
 # ────────────────────────────────────────────────────────────────────────────────
 
-translator = Translator()
+# Initialise le traducteur (auto → français)
+translator = GoogleTranslator(source='auto', target='fr')
 
-# Charge l'historique
+# Charge l’historique
 if os.path.exists(SEEN_FILE):
     with open(SEEN_FILE, 'r') as f:
         seen = set(json.load(f))
 else:
     seen = set()
 
-def process_feed(url, is_twitter=False):
-    """
-    Récupère les items d'un flux, filtre les déjà vus et envoie.
-    is_twitter : pour afficher « [Tweet] » ou non.
-    """
+def process_feed(url, prefix_label=""):
     feed = feedparser.parse(url)
     for entry in feed.entries:
         eid = entry.get('id', entry.link)
@@ -55,19 +48,19 @@ def process_feed(url, is_twitter=False):
             continue
         seen.add(eid)
 
+        # Texte original
         title_en   = entry.title
         summary_en = entry.get('summary', '').strip()
 
         # Traduction
         try:
-            title_fr   = translator.translate(title_en, dest='fr').text
-            summary_fr = translator.translate(summary_en, dest='fr').text
+            title_fr   = translator.translate(title_en)
+            summary_fr = translator.translate(summary_en) if summary_en else ""
         except Exception:
             title_fr, summary_fr = title_en, summary_en
 
-        prefix = "[Tweet] " if is_twitter else ""
         content = (
-            f"**{prefix}{title_fr}**\n"
+            f"{prefix_label}**{title_fr}**\n"
             f"{summary_fr}\n"
             f"{entry.link}"
         )
@@ -76,16 +69,16 @@ def process_feed(url, is_twitter=False):
         try:
             requests.post(WEBHOOK_URL, json=payload)
         except Exception as e:
-            print(f"Erreur lors de l'envoi webhook : {e}")
+            print(f"Erreur webhook : {e}")
 
-# Parcours des flux standard
+# Parcours des flux classiques
 for url in FEED_URLS:
-    process_feed(url, is_twitter=False)
+    process_feed(url, prefix_label="")
 
 # Parcours des flux Twitter
 for url in TWITTER_FEED_URLS:
-    process_feed(url, is_twitter=True)
+    process_feed(url, prefix_label="[Tweet] ")
 
-# Sauvegarde l'historique
+# Sauvegarde de l’historique
 with open(SEEN_FILE, 'w') as f:
     json.dump(list(seen), f)
