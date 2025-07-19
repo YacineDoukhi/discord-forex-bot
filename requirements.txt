@@ -1,4 +1,3 @@
-discord.py
 feedparser
+requests
 openai==0.28.0
-
