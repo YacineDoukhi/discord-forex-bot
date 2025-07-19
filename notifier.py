@@ -3,55 +3,61 @@ import json
 import feedparser
 import requests
 from deep_translator import GoogleTranslator
-from transformers import pipeline
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
 WEBHOOK_URL = os.environ['DISCORD_WEBHOOK_URL']
+HF_TOKEN    = os.environ['HF_TOKEN']            # Hugging Face token en secret GitHub
+HF_MODEL    = "google/flan-t5-base"             # modèle à appeler
+# ────────────────────────────────────────────────────────────────────────────────
 
+# Flux RSS Forex
 FEED_URLS = [
     'https://www.forexlive.com/feed',
     'https://www.fxstreet.com/rss/rssfeed.aspx?pid=1270&format=xml',
     'https://www.dailyfx.com/feeds/rss/news'
 ]
 
-TWITTER_USERS = [
-    'kathylienfx',
-    'AshrafLaidi',
-    'PeterLBrandt',
-    'JamieSaettele'
-]
+TWITTER_USERS = ['kathylienfx','AshrafLaidi','PeterLBrandt','JamieSaettele']
 TWITTER_FEED_URLS = [
-    f'https://twitrss.me/twitter_user_to_rss/?user={user}'
-    for user in TWITTER_USERS
+    f'https://twitrss.me/twitter_user_to_rss/?user={u}' for u in TWITTER_USERS
 ]
 
 SEEN_FILE = 'seen.json'
-# ────────────────────────────────────────────────────────────────────────────────
 
-# Traducteur auto→fr
+# Initialise le traducteur auto→fr
 translator = GoogleTranslator(source='auto', target='fr')
 
-# Initialise le pipeline de summarization Hugging Face
-summarizer = pipeline("summarization", model="google/flan-t5-base")
+# Headers pour HF Inference API
+HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
+
+def hf_summarize(prompt: str) -> str:
+    """Appelle l’Inference API HuggingFace pour générer le résumé."""
+    resp = requests.post(
+        f"https://api-inference.huggingface.co/models/{HF_MODEL}",
+        headers=HF_HEADERS,
+        json={"inputs": prompt}
+    )
+    if not resp.ok:
+        return f"ℹ️ Erreur HF API : {resp.status_code}"
+    data = resp.json()
+    # Certains modèles renvoient une liste de dicts :
+    if isinstance(data, list) and "generated_text" in data[0]:
+        return data[0]["generated_text"].strip()
+    # Autre format ?
+    return data.get("generated_text", str(data)).strip()
 
 def simplify_and_explain(title_fr: str, summary_fr: str) -> str:
     """
-    Utilise un modèle Hugging Face pour simplifier le titre et résumé,
-    et fournir une explication claire de l'impact sur EUR/USD.
+    Construit un prompt et passe à HF pour simplifier + expliquer l’impact EUR/USD.
     """
-    text = f"Titre : {title_fr}\nRésumé : {summary_fr}"
-    try:
-        out = summarizer(
-            text,
-            max_length=150,
-            min_length=40,
-            do_sample=False
-        )
-        return out[0]['summary_text'].strip()
-    except Exception as e:
-        return f"ℹ️ Impossible de générer l'analyse IA : {e}"
+    prompt = (
+        "Tu es un expert Forex très pédagogique. Simplifie ce titre et ce résumé "
+        "pour un débutant, et explique la conséquence probable sur la paire EUR/USD.\n\n"
+        f"Titre : {title_fr}\nRésumé : {summary_fr}"
+    )
+    return hf_summarize(prompt)
 
-# Charge l’historique des IDs déjà envoyés
+# Charge l’historique
 if os.path.exists(SEEN_FILE):
     with open(SEEN_FILE, 'r') as f:
         seen = set(json.load(f))
@@ -59,18 +65,14 @@ else:
     seen = set()
 
 def process_feed(url: str, prefix: str = "") -> None:
-    """
-    Lit un flux RSS, filtre les items déjà vus, génère le résumé IA,
-    et envoie uniquement ce dernier + le lien dans Discord.
-    """
     feed = feedparser.parse(url)
     for entry in feed.entries:
-        entry_id = entry.get('id', entry.link)
-        if entry_id in seen:
+        eid = entry.get('id', entry.link)
+        if eid in seen:
             continue
-        seen.add(entry_id)
+        seen.add(eid)
 
-        # Traduction du titre et du résumé en français
+        # Traduction
         title_en   = entry.title
         summary_en = entry.get('summary', '').strip()
         try:
@@ -79,25 +81,22 @@ def process_feed(url: str, prefix: str = "") -> None:
         except Exception:
             title_fr, summary_fr = title_en, summary_en
 
-        # Génération du texte simplifié et explicatif
+        # Génération du texte
         ai_text = simplify_and_explain(title_fr, summary_fr)
 
-        # Prépare et envoie uniquement le texte IA + lien
-        content = f"{prefix}{ai_text}\n\n{entry.link}"
-        payload = {"content": content}
+        # Envoi Discord
+        payload = {"content": f"{prefix}{ai_text}\n\n{entry.link}"}
         try:
             requests.post(WEBHOOK_URL, json=payload)
         except Exception as e:
-            print(f"Erreur envoi webhook : {e}")
+            print(f"Erreur envoi webhook : {e}")
 
-# Parcours des flux RSS Forex
+# Traite tous les flux
 for url in FEED_URLS:
-    process_feed(url, prefix="")
-
-# Parcours des flux Twitter
+    process_feed(url)
 for url in TWITTER_FEED_URLS:
     process_feed(url, prefix="[Tweet] ")
 
-# Sauvegarde de l’historique pour la prochaine exécution
+# Sauvegarde de l’historique
 with open(SEEN_FILE, 'w') as f:
     json.dump(list(seen), f)
