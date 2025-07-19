@@ -1,4 +1,4 @@
 feedparser
 requests
 deep-translator
-openai
+transformers         # ← ajoute cette ligne
