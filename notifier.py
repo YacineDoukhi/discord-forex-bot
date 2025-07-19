@@ -1,56 +1,50 @@
-import os, json, feedparser, requests
+import os
+import json
+import feedparser
+import requests
 from datetime import datetime
-import openai
 
-# Configuration depuis GitHub Secrets
-WEBHOOK_URL   = os.environ['DISCORD_WEBHOOK_URL']
-OPENAI_API_KEY = os.environ['OPENAI_API_KEY']
-FEED_URLS     = [
+# ─── CONFIGURATION ─────────────────────────────────────────────────────────────
+WEBHOOK_URL = os.environ['DISCORD_WEBHOOK_URL']
+FEED_URLS   = [
     'https://www.forexlive.com/feed',
     'https://www.fxstreet.com/rss/rssfeed.aspx?pid=1270&format=xml',
     'https://www.dailyfx.com/feeds/rss/news',
 ]
 SEEN_FILE = 'seen.json'
+# ────────────────────────────────────────────────────────────────────────────────
 
-# Init OpenAI
-openai.api_key = OPENAI_API_KEY
-
-# Charge les articles déjà vus
+# Charge l'historique des articles déjà notifiés
 if os.path.exists(SEEN_FILE):
-    seen = set(json.load(open(SEEN_FILE)))
+    with open(SEEN_FILE, 'r') as f:
+        seen = set(json.load(f))
 else:
     seen = set()
 
 for url in FEED_URLS:
     feed = feedparser.parse(url)
-    for e in feed.entries:
-        eid = e.get('id', e.link)
-        if eid in seen:
+    for entry in feed.entries:
+        entry_id = entry.get('id', entry.link)
+        if entry_id in seen:
             continue
-        seen.add(eid)
+        seen.add(entry_id)
 
-        # Génère l'analyse IA
-        prompt = (
-            f"Actu Forex : {e.title}\n\n"
-            f"Résumé : {e.get('summary','')}\n\n"
-            "Explique les conséquences possibles sur EUR/USD."
-        )
-        resp = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role":"system","content":"Tu es un expert Forex."},
-                {"role":"user","content":prompt}
-            ],
-            max_tokens=250
-        )
-        analysis = resp.choices[0].message.content.strip()
-
-        # Envoie sur Discord via webhook
+        # Prépare et envoie la notification via Webhook
+        title   = entry.title
+        summary = entry.get('summary', '').strip()
+        link    = entry.link
         payload = {
-            "content": f"**{e.title}**\n{analysis}\n{e.link}"
+            "content": (
+                f"**{title}**\n"
+                f"{summary}\n"
+                f"{link}"
+            )
         }
-        requests.post(WEBHOOK_URL, json=payload)
+        try:
+            requests.post(WEBHOOK_URL, json=payload)
+        except Exception as e:
+            print(f"Erreur envoi webhook : {e}")
 
-# Sauvegarde l’historique
+# Sauvegarde l’historique pour ne pas renvoyer deux fois le même article
 with open(SEEN_FILE, 'w') as f:
     json.dump(list(seen), f)
