@@ -36,7 +36,7 @@ for url in FEED_URLS:
             "Explique les conséquences possibles sur EUR/USD."
         )
         resp = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",
             messages=[
                 {"role":"system","content":"Tu es un expert Forex."},
                 {"role":"user","content":prompt}
