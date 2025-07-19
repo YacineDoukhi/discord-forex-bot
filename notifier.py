@@ -3,8 +3,7 @@ import json
 import feedparser
 import requests
 from deep_translator import GoogleTranslator
-import openai==0.28.0
-
+import openai
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
 WEBHOOK_URL    = os.environ['DISCORD_WEBHOOK_URL']
 OPENAI_API_KEY = os.environ['OPENAI_API_KEY']
