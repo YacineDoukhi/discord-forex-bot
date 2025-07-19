@@ -4,11 +4,14 @@ import feedparser
 import requests
 from datetime import datetime
 from deep_translator import GoogleTranslator
+import openai
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
-WEBHOOK_URL = os.environ['DISCORD_WEBHOOK_URL']
+WEBHOOK_URL     = os.environ['DISCORD_WEBHOOK_URL']
+OPENAI_API_KEY  = os.environ['OPENAI_API_KEY']
+openai.api_key  = OPENAI_API_KEY
 
-# Flux RSS classiques
+# Flux RSS Forex classiques
 FEED_URLS = [
     'https://www.forexlive.com/feed',
     'https://www.fxstreet.com/rss/rssfeed.aspx?pid=1270&format=xml',
@@ -30,17 +33,43 @@ TWITTER_FEED_URLS = [
 SEEN_FILE = 'seen.json'
 # ────────────────────────────────────────────────────────────────────────────────
 
-# Initialise le traducteur (auto → français)
+# Traducteur auto→fr
 translator = GoogleTranslator(source='auto', target='fr')
 
-# Charge l’historique
+# Charge l’historique pour ne pas republier deux fois la même source
 if os.path.exists(SEEN_FILE):
     with open(SEEN_FILE, 'r') as f:
         seen = set(json.load(f))
 else:
     seen = set()
 
-def process_feed(url, prefix_label=""):
+def simplify_and_explain(title_fr: str, summary_fr: str) -> str:
+    """
+    Appelle OpenAI pour simplifier et expliquer l'impact sur EUR/USD.
+    """
+    prompt = (
+        "Tu es un expert Forex très pédagogique.\n"
+        "Simplifie ce titre et ce résumé pour qu'un débutant comprenne, "
+        "et explique la conséquence probable sur la paire EUR/USD.\n\n"
+        f"Titre : {title_fr}\n"
+        f"Résumé : {summary_fr}"
+    )
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "You are a helpful Forex market analyst."},
+            {"role": "user",   "content": prompt}
+        ],
+        temperature=0.7,
+        max_tokens=300
+    )
+    return response.choices[0].message.content.strip()
+
+def process_feed(url: str, prefix: str = "") -> None:
+    """
+    Récupère les items d'un flux RSS, filtre les déjà vus, génère l'analyse IA
+    et envoie uniquement le texte IA + lien dans Discord.
+    """
     feed = feedparser.parse(url)
     for entry in feed.entries:
         eid = entry.get('id', entry.link)
@@ -48,37 +77,10 @@ def process_feed(url, prefix_label=""):
             continue
         seen.add(eid)
 
-        # Texte original
+        # Traduire le titre et le résumé en français
         title_en   = entry.title
         summary_en = entry.get('summary', '').strip()
-
-        # Traduction
         try:
             title_fr   = translator.translate(title_en)
             summary_fr = translator.translate(summary_en) if summary_en else ""
         except Exception:
-            title_fr, summary_fr = title_en, summary_en
-
-        content = (
-            f"{prefix_label}**{title_fr}**\n"
-            f"{summary_fr}\n"
-            f"{entry.link}"
-        )
-        payload = {"content": content}
-
-        try:
-            requests.post(WEBHOOK_URL, json=payload)
-        except Exception as e:
-            print(f"Erreur webhook : {e}")
-
-# Parcours des flux classiques
-for url in FEED_URLS:
-    process_feed(url, prefix_label="")
-
-# Parcours des flux Twitter
-for url in TWITTER_FEED_URLS:
-    process_feed(url, prefix_label="[Tweet] ")
-
-# Sauvegarde de l’historique
-with open(SEEN_FILE, 'w') as f:
-    json.dump(list(seen), f)
