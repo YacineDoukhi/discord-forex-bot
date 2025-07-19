@@ -2,7 +2,6 @@ import os
 import json
 import feedparser
 import requests
-from datetime import datetime
 from deep_translator import GoogleTranslator
 import openai
 
@@ -11,14 +10,12 @@ WEBHOOK_URL     = os.environ['DISCORD_WEBHOOK_URL']
 OPENAI_API_KEY  = os.environ['OPENAI_API_KEY']
 openai.api_key  = OPENAI_API_KEY
 
-# Flux RSS Forex classiques
 FEED_URLS = [
     'https://www.forexlive.com/feed',
     'https://www.fxstreet.com/rss/rssfeed.aspx?pid=1270&format=xml',
     'https://www.dailyfx.com/feeds/rss/news',
 ]
 
-# Comptes Twitter pro Forex à surveiller
 TWITTER_USERS = [
     'kathylienfx',
     'AshrafLaidi',
@@ -33,10 +30,10 @@ TWITTER_FEED_URLS = [
 SEEN_FILE = 'seen.json'
 # ────────────────────────────────────────────────────────────────────────────────
 
-# Traducteur auto→fr
+# Traducteur auto → fr
 translator = GoogleTranslator(source='auto', target='fr')
 
-# Charge l’historique pour ne pas republier deux fois la même source
+# Charge l'historique existant
 if os.path.exists(SEEN_FILE):
     with open(SEEN_FILE, 'r') as f:
         seen = set(json.load(f))
@@ -67,20 +64,32 @@ def simplify_and_explain(title_fr: str, summary_fr: str) -> str:
 
 def process_feed(url: str, prefix: str = "") -> None:
     """
-    Récupère les items d'un flux RSS, filtre les déjà vus, génère l'analyse IA
-    et envoie uniquement le texte IA + lien dans Discord.
+    Récupère les items d'un flux RSS, filtre les déjà vus,
+    génère l'analyse IA et envoie uniquement le texte IA + lien.
     """
     feed = feedparser.parse(url)
     for entry in feed.entries:
-        eid = entry.get('id', entry.link)
-        if eid in seen:
+        entry_id = entry.get('id', entry.link)
+        if entry_id in seen:
             continue
-        seen.add(eid)
+        seen.add(entry_id)
 
-        # Traduire le titre et le résumé en français
+        # Traduction du titre et du résumé
         title_en   = entry.title
         summary_en = entry.get('summary', '').strip()
         try:
             title_fr   = translator.translate(title_en)
             summary_fr = translator.translate(summary_en) if summary_en else ""
         except Exception:
+            title_fr, summary_fr = title_en, summary_en
+
+        # Appel OpenAI pour simplifier et expliquer
+        try:
+            ai_text = simplify_and_explain(title_fr, summary_fr)
+        except Exception as e:
+            ai_text = f"ℹ️ Impossible de générer l'analyse IA : {e}"
+
+        # Envoi via webhook : **seulement** le texte IA + lien
+        content = (
+            f"{prefix}{ai_text}\n\n"
+            f"{e
