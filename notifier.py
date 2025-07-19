@@ -6,14 +6,14 @@ from deep_translator import GoogleTranslator
 import openai
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
-WEBHOOK_URL     = os.environ['DISCORD_WEBHOOK_URL']
-OPENAI_API_KEY  = os.environ['OPENAI_API_KEY']
-openai.api_key  = OPENAI_API_KEY
+WEBHOOK_URL    = os.environ['DISCORD_WEBHOOK_URL']
+OPENAI_API_KEY = os.environ['OPENAI_API_KEY']
+openai.api_key = OPENAI_API_KEY
 
 FEED_URLS = [
     'https://www.forexlive.com/feed',
     'https://www.fxstreet.com/rss/rssfeed.aspx?pid=1270&format=xml',
-    'https://www.dailyfx.com/feeds/rss/news',
+    'https://www.dailyfx.com/feeds/rss/news'
 ]
 
 TWITTER_USERS = [
@@ -30,10 +30,10 @@ TWITTER_FEED_URLS = [
 SEEN_FILE = 'seen.json'
 # ────────────────────────────────────────────────────────────────────────────────
 
-# Traducteur auto → fr
+# Initialise le traducteur auto→fr
 translator = GoogleTranslator(source='auto', target='fr')
 
-# Charge l'historique existant
+# Charge l’historique des IDs déjà envoyés
 if os.path.exists(SEEN_FILE):
     with open(SEEN_FILE, 'r') as f:
         seen = set(json.load(f))
@@ -64,8 +64,8 @@ def simplify_and_explain(title_fr: str, summary_fr: str) -> str:
 
 def process_feed(url: str, prefix: str = "") -> None:
     """
-    Récupère les items d'un flux RSS, filtre les déjà vus,
-    génère l'analyse IA et envoie uniquement le texte IA + lien.
+    Lit un flux RSS, filtre les items déjà vus, génère l'analyse IA
+    et envoie uniquement le texte IA + lien.
     """
     feed = feedparser.parse(url)
     for entry in feed.entries:
@@ -83,13 +83,31 @@ def process_feed(url: str, prefix: str = "") -> None:
         except Exception:
             title_fr, summary_fr = title_en, summary_en
 
-        # Appel OpenAI pour simplifier et expliquer
+        # Appel de l'IA pour simplifier et expliquer
         try:
             ai_text = simplify_and_explain(title_fr, summary_fr)
         except Exception as e:
             ai_text = f"ℹ️ Impossible de générer l'analyse IA : {e}"
 
-        # Envoi via webhook : **seulement** le texte IA + lien
+        # Prépare et envoie uniquement le texte IA + lien
         content = (
             f"{prefix}{ai_text}\n\n"
-            f"{e
+            f"{entry.link}"
+        )
+        payload = {"content": content}
+        try:
+            requests.post(WEBHOOK_URL, json=payload)
+        except Exception as e:
+            print(f"Erreur envoi webhook : {e}")
+
+# Parcours des flux RSS classiques
+for url in FEED_URLS:
+    process_feed(url, prefix="")
+
+# Parcours des flux Twitter
+for url in TWITTER_FEED_URLS:
+    process_feed(url, prefix="[Tweet] ")
+
+# Sauvegarde de l’historique pour ne pas renvoyer à nouveau
+with open(SEEN_FILE, 'w') as f:
+    json.dump(list(seen), f)
