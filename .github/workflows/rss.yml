@@ -1,6 +1,6 @@
 name: RSS → Discord
 
-# Ce workflow se déclenche toutes les 5 minutes, et peut aussi être lancé manuellement
+# Déclenchement toutes les 5 minutes + possibilité run manuel
 on:
   schedule:
     - cron: '*/5 * * * *'
@@ -21,11 +21,13 @@ jobs:
         with:
           python-version: '3.x'
 
-      # 3) Installe les dépendances nécessaires
+      # 3) Installe les dépendances depuis requirements.txt
       - name: Install dependencies
-        run: pip install feedparser openai requests
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
-      # 4) Lance ton script notifier.py
+      # 4) Exécute le script notifier.py
       - name: Run notifier
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
